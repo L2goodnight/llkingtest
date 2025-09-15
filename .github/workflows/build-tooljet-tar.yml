@@ -1,0 +1,64 @@
+name: Package ToolJet Try Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Target platform"
+        required: true
+        default: "linux/amd64"
+      image_tag:
+        description: "ToolJet Try image tag"
+        required: true
+        default: "tooljet/try:ee-lts-latest"
+      part_size_mb:
+        description: "Split part size in MB (for artifact files)"
+        required: true
+        default: "1900"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (optional)
+        uses: actions/checkout@v4
+
+      - name: Install zstd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+
+      - name: Pull ToolJet Try image
+        env:
+          PLATFORM: ${{ github.event.inputs.platform }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -eux
+          docker pull --platform "${PLATFORM}" "${IMAGE_TAG}"
+          docker images
+
+      - name: Save and compress image
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -eux
+          mkdir -p out
+          docker save "${IMAGE_TAG}" | zstd -19 -T0 -o out/tooljet_try.tar.zst
+          sha256sum out/tooljet_try.tar.zst | tee out/tooljet_try.tar.zst.sha256
+
+      - name: Split compressed image
+        env:
+          PART_SIZE_MB: ${{ github.event.inputs.part_size_mb }}
+        run: |
+          set -eux
+          cd out
+          split -b "$((PART_SIZE_MB))"m tooljet_try.tar.zst tooljet_try.tar.zst.part.
+
+      - name: Upload split parts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tooljet_try_parts
+          path: |
+            out/tooljet_try.tar.zst.part.*
+            out/tooljet_try.tar.zst.sha256
+          retention-days: 14
