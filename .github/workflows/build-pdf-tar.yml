@@ -1,0 +1,60 @@
+name: Package Stirling-PDF image (no compression)
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Target platform"
+        required: true
+        default: "linux/amd64"
+      image_tag:
+        description: "Image to package"
+        required: true
+        default: "docker.stirlingpdf.com/stirlingtools/stirling-pdf:latest"
+      part_size_mb:
+        description: "Split size per part (MB)"
+        required: true
+        default: "1900"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (optional)
+        uses: actions/checkout@v4
+
+      - name: Pull Stirling-PDF image
+        env:
+          PLATFORM: ${{ github.event.inputs.platform }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -eux
+          docker pull --platform "${PLATFORM}" "${IMAGE_TAG}"
+          docker images
+
+      - name: Save image to tar
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -eux
+          mkdir -p out
+          docker save "${IMAGE_TAG}" -o out/stirlingpdf.tar
+          sha256sum out/stirlingpdf.tar | tee out/stirlingpdf.tar.sha256
+
+      - name: Split tar into parts
+        env:
+          PART_SIZE_MB: ${{ github.event.inputs.part_size_mb }}
+        run: |
+          set -eux
+          cd out
+          split -b "$((PART_SIZE_MB))"m stirlingpdf.tar stirlingpdf.tar.part.
+
+      - name: Upload parts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stirlingpdf_parts
+          path: |
+            out/stirlingpdf.tar.part.*
+            out/stirlingpdf.tar.sha256
+          retention-days: 14
+          if-no-files-found: error
