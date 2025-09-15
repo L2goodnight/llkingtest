@@ -1,4 +1,4 @@
-name: Package ToolJet Try Image
+name: Package tooljet/try (no compression)
 
 on:
   workflow_dispatch:
@@ -8,11 +8,11 @@ on:
         required: true
         default: "linux/amd64"
       image_tag:
-        description: "ToolJet Try image tag"
+        description: "Image to package"
         required: true
         default: "tooljet/try:ee-lts-latest"
       part_size_mb:
-        description: "Split part size in MB (for artifact files)"
+        description: "Split size per part (MB)"
         required: true
         default: "1900"
 
@@ -23,12 +23,7 @@ jobs:
       - name: Checkout (optional)
         uses: actions/checkout@v4
 
-      - name: Install zstd
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zstd
-
-      - name: Pull ToolJet Try image
+      - name: Pull image
         env:
           PLATFORM: ${{ github.event.inputs.platform }}
           IMAGE_TAG: ${{ github.event.inputs.image_tag }}
@@ -37,28 +32,30 @@ jobs:
           docker pull --platform "${PLATFORM}" "${IMAGE_TAG}"
           docker images
 
-      - name: Save and compress image
+      - name: Save image to tar (no compression)
         env:
           IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
           set -eux
           mkdir -p out
-          docker save "${IMAGE_TAG}" | zstd -19 -T0 -o out/tooljet_try.tar.zst
-          sha256sum out/tooljet_try.tar.zst | tee out/tooljet_try.tar.zst.sha256
+          docker save "${IMAGE_TAG}" -o out/tooljet_try.tar
+          sha256sum out/tooljet_try.tar | tee out/tooljet_try.tar.sha256
 
-      - name: Split compressed image
+      - name: Split tar into parts
         env:
           PART_SIZE_MB: ${{ github.event.inputs.part_size_mb }}
         run: |
           set -eux
           cd out
-          split -b "$((PART_SIZE_MB))"m tooljet_try.tar.zst tooljet_try.tar.zst.part.
+          # 以 1900MB 分卷，避免单文件过大导致上传失败
+          split -b "$((PART_SIZE_MB))"m tooljet_try.tar tooljet_try.tar.part.
 
-      - name: Upload split parts
+      - name: Upload parts (artifacts)
         uses: actions/upload-artifact@v4
         with:
-          name: tooljet_try_parts
+          name: tooljet_try_tar_parts
           path: |
-            out/tooljet_try.tar.zst.part.*
-            out/tooljet_try.tar.zst.sha256
+            out/tooljet_try.tar.part.*
+            out/tooljet_try.tar.sha256
           retention-days: 14
+          if-no-files-found: error
